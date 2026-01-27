@@ -1,26 +1,36 @@
-name: mygo
+name: MyGO Auto Post
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 每小時整點自動執行一次 (UTC 時間)
-  workflow_dispatch:      # 也可以手動點擊按鈕執行
+    - cron: '0 * * * *'  # 每小時整點自動執行
+  workflow_dispatch:      # 手動按鈕啟動
 
 jobs:
   post:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+          
       - name: Install dependencies
         run: |
           pip install playwright google-api-python-client google-auth
           playwright install chromium
+          
       - name: Run Script
         env:
           THREADS_USERNAME: ${{ secrets.THREADS_USERNAME }}
           THREADS_PASSWORD: ${{ secrets.THREADS_PASSWORD }}
           GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
-        run: python autopost.py
+        run: |
+          # 執行腳本，並在結束後自動提交 progress.txt 的更改
+          python autopost.py
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add progress.txt
+          git commit -m "update progress" || exit 0
+          git push
