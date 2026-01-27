@@ -1,11 +1,13 @@
 import os
 import json
-import requests
 import time
+import io
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+from playwright.sync_api import sync_playwright
 
-# --- [1] 配置區：資料夾清單 ---
+# --- 配置區 ---
 FOLDER_LIST = [
     {'name': 'mygo123_part1', 'id': '1ej8KQ7dV5Vi2DvpJ0rw-Bv17T3DTisma'},
     {'name': 'mygo123_part2', 'id': '1Ba2FHg9U4CCp5ZRloeObj3w9k0B0FN_m'},
@@ -20,71 +22,105 @@ FOLDER_LIST = [
     {'name': 'mygo12', 'id': '1CHTpS_abB6SsLcgQBCMtLhKnKgMbLjgd'},
     {'name': 'mygo13', 'id': '1cVtofiJZDEbhNlNhtHcg0DOEO6nPsCPf'}
 ]
-
 PROGRESS_FILE = 'progress.txt'
 
-# --- [2] 載入環境變數 (GitHub Secrets) ---
-def get_env_secrets():
-    return {
-        'gdrive_json': json.loads(os.getenv('GDRIVE_JSON')),
-        'threads_token': os.getenv('THREADS_TOKEN'),
-        'threads_user_id': os.getenv('THREADS_USER_ID')
-    }
+def download_image(service, folder_id, filename):
+    query = f"'{folder_id}' in parents and name = '{filename}'"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get('files', [])
+    if not items: return None
+    
+    file_id = items[0]['id']
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while done is False:
+        status, done = downloader.next_chunk()
+    
+    local_path = "temp.jpg"
+    with open(local_path, "wb") as f:
+        f.write(fh.getbuffer())
+    return local_path
 
 def main():
-    secrets = get_env_secrets()
-    
-    # 讀取進度 (資料夾索引, 圖片編號)
-    if not os.path.exists(PROGRESS_FILE):
-        f_idx, i_idx = 0, 1
-    else:
-        with open(PROGRESS_FILE, 'r') as f:
-            f_idx, i_idx = map(int, f.read().strip().split(','))
-
-    if f_idx >= len(FOLDER_LIST):
-        print("🎉 全劇終，太棒了！")
-        return
-
-    current_folder = FOLDER_LIST[f_idx]
-    filename = f"frame_{i_idx:04d}.jpg"
-
-    # --- [3] Google Drive 找圖 ---
-    creds = service_account.Credentials.from_service_account_info(
-        secrets['gdrive_json'], scopes=['https://www.googleapis.com/auth/drive.readonly'])
-    service = build('drive', 'v3', credentials=creds)
-
-    query = f"'{current_folder['id']}' in parents and name = '{filename}'"
-    results = service.files().list(q=query, fields="files(id)").execute()
-    items = results.get('files', [])
-
-    if not items:
-        print(f"⏭️ {current_folder['name']} 播完或找不到 {filename}，跳下一集")
-        with open(PROGRESS_FILE, 'w') as f: f.write(f"{f_idx + 1},1")
-        return
-
-    file_id = items[0]['id']
-    # 這是直接下載網址，Threads 伺服器會來這裡抓圖
-    image_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-
-    # --- [4] Threads API 發布 ---
-    print(f"🚀 正在發送：{current_folder['name']} - {filename}")
-    
-    # 第一步：建立媒體容器
-    base_url = "https://graph.threads.net/v1.0"
-    create_url = f"{base_url}/{secrets['threads_user_id']}/threads"
-    
-    payload = {
-        'media_type': 'IMAGE',
-        'image_url': image_url,
-        'text': f"MyGO!!!!! {current_folder['name']} \nFrame: {i_idx}", # 這裡可以自訂文字
-        'access_token': secrets['threads_token']
+    # 載入密鑰
+    secrets = {
+        'gdrive': json.loads(os.getenv('GDRIVE_JSON')),
+        'user': os.getenv('THREADS_USERNAME'),
+        'pass': os.getenv('THREADS_PASSWORD')
     }
-    
-    res = requests.post(create_url, data=payload).json()
-    
-    if 'id' in res:
-        creation_id = res['id']
-        # 第二步：正式發布 (等一下讓伺服器抓圖)
-        time.sleep(10) 
-        publish_url = f"{base_url}/{secrets['threads_user_id']}/threads_publish"
-        publish
+
+    # Google Drive 認證
+    creds = service_account.Credentials.from_service_account_info(secrets['gdrive'])
+    drive_service = build('drive', 'v3', credentials=creds)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={'width': 1280, 'height': 720})
+        page = context.new_page()
+
+        # 登入 Threads
+        print("🔑 正在登入 Threads...")
+        page.goto("https://www.threads.net/login")
+        page.fill('input[placeholder*="帳號"]', secrets['user']) # 這裡用 placeholder 抓更穩
+        page.fill('input[placeholder*="密碼"]', secrets['pass'])
+        page.click('div[role="button"]:has-text("登入")')
+        page.wait_for_url("https://www.threads.net/", timeout=60000)
+        print("✅ 登入成功！")
+
+        # 循環發送 5 張
+        for _ in range(5):
+            if not os.path.exists(PROGRESS_FILE):
+                f_idx, i_idx = 0, 1
+            else:
+                with open(PROGRESS_FILE, 'r') as f:
+                    f_idx, i_idx = map(int, f.read().strip().split(','))
+
+            if f_idx >= len(FOLDER_LIST):
+                print("🏁 全劇終！")
+                break
+
+            folder = FOLDER_LIST[f_idx]
+            filename = f"frame_{i_idx:04d}.jpg"
+            
+            print(f"📸 準備下載 {folder['name']} - {filename}")
+            img_path = download_image(drive_service, folder['id'], filename)
+
+            if not img_path:
+                print(f"⏭️ 找不到檔案，跳下一集")
+                with open(PROGRESS_FILE, 'w') as f: f.write(f"{f_idx + 1},1")
+                continue
+
+            # 發文操作
+            try:
+                page.goto("https://www.threads.net/")
+                page.click('div[role="presentation"] svg[aria-label="建立內容"]') # 點擊發文
+                page.wait_for_selector('div[role="textbox"]')
+                page.keyboard.type(f"MyGO!!!!! {folder['name']}\nFrame: {i_idx}")
+                
+                # 上傳圖片 (Playwright 的上傳方式)
+                with page.expect_file_chooser() as fc_info:
+                    page.click('svg[aria-label="附加媒體"]') # 點擊上傳圖示
+                file_chooser = fc_info.value
+                file_chooser.set_files(img_path)
+                
+                time.sleep(3) # 等待圖片載入
+                page.click('div[role="button"]:has-text("發佈")')
+                print(f"✅ 已成功發佈：{filename}")
+
+                # 更新進度
+                with open(PROGRESS_FILE, 'w') as f:
+                    f.write(f"{f_idx},{i_idx + 1}")
+                
+                print("⏳ 等待 600 秒後發送下一張...")
+                time.sleep(600)
+
+            except Exception as e:
+                print(f"❌ 發佈過程出錯: {e}")
+                break
+
+        browser.close()
+
+if __name__ == "__main__":
+    main()
