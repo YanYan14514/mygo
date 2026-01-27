@@ -1,0 +1,26 @@
+name: mygo
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 每小時整點自動執行一次 (UTC 時間)
+  workflow_dispatch:      # 也可以手動點擊按鈕執行
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: |
+          pip install playwright google-api-python-client google-auth
+          playwright install chromium
+      - name: Run Script
+        env:
+          THREADS_USERNAME: ${{ secrets.THREADS_USERNAME }}
+          THREADS_PASSWORD: ${{ secrets.THREADS_PASSWORD }}
+          GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
+        run: python autopost.py
