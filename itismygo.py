@@ -29,39 +29,32 @@ def download_image(service, folder_id, filename):
     results = service.files().list(q=query, fields="files(id, name)").execute()
     items = results.get('files', [])
     if not items: return None
-    
     file_id = items[0]['id']
     request = service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
     done = False
-    while done is False:
+    while not done:
         status, done = downloader.next_chunk()
-    
     local_path = "temp.jpg"
     with open(local_path, "wb") as f:
         f.write(fh.getbuffer())
     return local_path
 
 def main():
-    # 載入密鑰
     secrets = {
         'gdrive': json.loads(os.getenv('GDRIVE_JSON')),
         'user': os.getenv('THREADS_USERNAME'),
         'pass': os.getenv('THREADS_PASSWORD')
     }
-
-    # Google Drive 認證
     creds = service_account.Credentials.from_service_account_info(secrets['gdrive'])
     drive_service = build('drive', 'v3', credentials=creds)
 
     with sync_playwright() as p:
-        # 啟動瀏覽器
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={'width': 1280, 'height': 720})
         page = context.new_page()
 
-        # 登入 Threads
         print("🔑 正在登入 Threads...")
         page.goto("https://www.threads.net/login")
         page.fill('input[placeholder*="帳號"]', secrets['user'])
@@ -70,9 +63,7 @@ def main():
         page.wait_for_url("https://www.threads.net/", timeout=60000)
         print("✅ 登入成功！")
 
-        # 每小時循環發送 6 張
         for i in range(6):
-            # 讀取當前進度
             if not os.path.exists(PROGRESS_FILE):
                 f_idx, i_idx = 0, 1
             else:
@@ -86,53 +77,42 @@ def main():
 
             folder = FOLDER_LIST[f_idx]
             filename = f"frame_{i_idx:04d}.jpg"
-            
-            print(f"📸 準備下載 {folder['name']} - {filename}")
             img_path = download_image(drive_service, folder['id'], filename)
 
             if not img_path:
-                print(f"⏭️ 找不到檔案，自動進入下一集")
-                with open(PROGRESS_FILE, 'w') as f:
-                    f.write(f"{f_idx + 1},1")
+                print(f"⏭️ 找不到檔案，跳下一集")
+                with open(PROGRESS_FILE, 'w') as f: f.write(f"{f_idx + 1},1")
                 continue
 
             try:
-                # 執行發文流程
                 page.goto("https://www.threads.net/")
                 page.wait_for_selector('svg[aria-label="建立內容"]', timeout=30000)
                 page.click('svg[aria-label="建立內容"]')
                 page.wait_for_selector('div[role="textbox"]')
                 
-                # 輸入文字
-                page.keyboard.type(f"MyGO!!!!! {folder['name']}\nFrame: {i_idx}")
+                # 時間換算 (一秒一張)
+                mm, ss = divmod(i_idx, 60)
+                ep_num = folder['name'].replace('mygo', '').replace('123_part1', '1').replace('123_part2', '1')
+                content = f"BanG Dream! It's MyGO!!!!! 第 {ep_num} 集 {mm:02d}:{ss:02d}"
                 
-                # 上傳圖片
+                page.keyboard.type(content)
                 with page.expect_file_chooser() as fc_info:
                     page.click('svg[aria-label="附加媒體"]')
-                file_chooser = fc_info.value
-                file_chooser.set_files(img_path)
+                fc_info.value.set_files(img_path)
                 
-                time.sleep(5) # 等待圖片載入完成
-                
-                # 發佈
+                time.sleep(5) 
                 page.click('div[role="button"]:has-text("發佈")')
-                print(f"✅ 已成功發佈第 {i+1}/6 張：{filename}")
+                print(f"✅ 已成功發佈：{content}")
 
-                # 存入進度
                 with open(PROGRESS_FILE, 'w') as f:
                     f.write(f"{f_idx},{i_idx + 1}")
                 
-                # 如果還沒發完 6 張，就等待 600 秒
                 if i < 5:
-                    print("⏳ 等待 600 秒後發送下一張...")
+                    print("⏳ 等待 600 秒...")
                     time.sleep(600)
-                else:
-                    print("✅ 本小時任務完成。")
-
             except Exception as e:
-                print(f"❌ 發佈過程出錯: {e}")
+                print(f"❌ 出錯: {e}")
                 break
-
         browser.close()
 
 if __name__ == "__main__":
