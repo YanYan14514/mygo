@@ -44,22 +44,24 @@ def main():
     creds = service_account.Credentials.from_service_account_info(json.loads(g_js))
     drive_service = build('drive', 'v3', credentials=creds)
     
+    # 讀取目前進度
     f_idx, i_idx = (0, 1)
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, 'r') as f:
             line = f.read().strip()
-            if line: f_idx, i_idx = map(int, line.split(','))
+            if line: 
+                parts = line.split(',')
+                f_idx, i_idx = int(parts[0]), int(parts[1])
 
     with sync_playwright() as p:
-        # 使用真實瀏覽器參數
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={'width': 1280, 'height': 800},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         
-        # 強制注入 Cookie 到所有可能的網域
-        for domain in [".threads.net", "www.threads.net", ".threads.com", "www.threads.com"]:
+        # 注入 Cookie 到所有相關網域
+        for domain in [".threads.net", ".threads.com", "www.threads.net", "www.threads.com"]:
             context.add_cookies([
                 {'name': 'sessionid', 'value': s_id, 'domain': domain, 'path': '/'},
                 {'name': 'ds_user_id', 'value': u_id, 'domain': domain, 'path': '/'},
@@ -67,57 +69,51 @@ def main():
             ])
         
         page = context.new_page()
-        print(f"🌐 準備發佈：Episode {f_idx}, Frame {i_idx}")
+        print(f"🌐 嘗試發佈：Episode {f_idx}, Frame {i_idx}")
 
         try:
-            # 前往發文介面
             page.goto("https://www.threads.net/intent/post", wait_until="networkidle", timeout=60000)
-            time.sleep(8)
+            time.sleep(10)
             page.screenshot(path="1_after_load.png")
 
             if "login" in page.url:
-                print(f"🚨 登入失效！頁面停留在: {page.url}")
-                return
+                print(f"🚨 登入失效！目前網址: {page.url}"); return
 
-            # 嘗試定位發文框 (Threads 可能有多種結構)
             textbox = page.locator('div[role="textbox"]').first
-            if not textbox.is_visible():
-                print("⚠️ 未直接看到發文框，嘗試點擊起始按鈕...")
-                page.click('text="什麼新新鮮事？"', timeout=5000) # 繁體中文適配
-                time.sleep(2)
-
             img_path = download_image(drive_service, FOLDER_LIST[f_idx]['id'], i_idx)
+            
             if img_path:
-                print("🖋️ 填寫內文...")
-                textbox.fill(f"BanG Dream! It's MyGO!!!!! {FOLDER_LIST[f_idx]['name']} - Frame {i_idx} #MyGO")
+                print("🖋️ 填寫內容與上傳圖片...")
+                textbox.fill(f"BanG Dream! It's MyGO!!!!! {FOLDER_LIST[f_idx]['name']} - Frame {i_idx}")
                 
-                print("🖼️ 上傳圖片...")
-                # 這裡改用更穩定的選擇器
                 with page.expect_file_chooser() as fc_info:
-                    page.locator('svg[aria-label*="媒體"], svg[aria-label*="Attach"], svg[aria-label*="附加"]').first.click()
+                    # 尋找媒體上傳按鈕
+                    page.locator('svg[aria-label*="媒體"], svg[aria-label*="附加"], svg[aria-label*="Attach"]').first.click()
                 fc_info.value.set_files(img_path)
                 
-                time.sleep(12) # 等待圖片處理
+                time.sleep(15) # 等待圖片渲染
                 page.screenshot(path="2_before_post.png")
 
-                # 點擊發佈
-                post_btn = page.locator('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")').first
+                # 強力搜尋發佈按鈕
+                post_btn = page.get_by_role("button", name="發佈").or_(page.get_by_role("button", name="Post"))
+                
                 if post_btn.is_enabled():
                     post_btn.click()
-                    print("🚀 已點擊發佈按鈕，等待回應...")
+                    print("🚀 已點擊發佈，等待 10 秒...")
                     time.sleep(10)
                     page.screenshot(path="3_after_post.png")
                     
-                    # 成功後更新進度
+                    # 更新 progress.txt
+                    new_i_idx = i_idx + 1
                     with open(PROGRESS_FILE, 'w') as f:
-                        f.write(f"{f_idx},{i_idx+1}")
-                    print(f"🎉 任務完成！下一張：{i_idx+1}")
+                        f.write(f"{f_idx},{new_i_idx}")
+                    print(f"🎉 成功！進度已更新為 {f_idx},{new_i_idx}")
                 else:
-                    print("❌ 發佈按鈕無法點擊（可能是圖片還沒傳完）")
+                    print("❌ 發佈按鈕處於禁用狀態")
             
         except Exception as e:
-            print(f"❌ 執行異常: {e}")
-            page.screenshot(path="error_fatal.png")
+            print(f"❌ 發生異常: {e}")
+            page.screenshot(path="error_log.png")
             
         browser.close()
 
