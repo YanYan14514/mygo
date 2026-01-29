@@ -27,10 +27,9 @@ jobs:
       - name: 執行自動發文
         env:
           GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
-          THREADS_USERNAME: ${{ secrets.THREADS_USERNAME }}
-          THREADS_PASSWORD: ${{ secrets.THREADS_PASSWORD }}
-        run: python autopost.py
-
+          THREADS_SESSION_ID: ${{ secrets.THREADS_SESSION_ID }}
+        run: python autopost.py 
+        
       - name: 儲存偵錯資料
         if: always()
         uses: actions/upload-artifact@v4
