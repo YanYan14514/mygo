@@ -9,7 +9,7 @@ from playwright.sync_api import sync_playwright
 
 # --- 配置區 ---
 FOLDER_LIST = [
-    {'name': 'mygo123', 'id': '1ej8KQ7dV5Vi2DvpJ0rw-Bv17T3DTisma'},
+    {'name': 'mygo123', 'id': '1Ba2FHg9U4CCp5ZRloeObj3w9k0B0FN_m'},
     {'name': 'mygo4', 'id': '1TyKoUKlsuARHQ59gViPU4H9SKT2JbERD'},
     {'name': 'mygo5', 'id': '1NW98O1i6EkO_SlZWqLtNBO78N-vveugw'},
     {'name': 'mygo6', 'id': '1F6vmpH2PCZ-H8qQ1OGxFDqEJBmS_zJ9k'},
@@ -150,3 +150,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
