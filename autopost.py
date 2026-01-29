@@ -63,27 +63,32 @@ def main():
         )
         page = context.new_page()
 
-        print("🔑 正在登入 Threads...")
-        page.goto("https://www.threads.net/login", wait_until="networkidle")
+       # 使用 Session ID 直接登入
+        print("Authorization: 使用 Session Cookie 繞過登入驗證...")
+        session_id = os.getenv('THREADS_SESSION_ID')
         
-        try:
-            # 等待輸入框出現
-            page.wait_for_selector('input', timeout=60000)
-            
-            # 抓取頁面上所有輸入框並填寫
-            inputs = page.query_selector_all('input')
-            if len(inputs) >= 2:
-                inputs[0].fill(secrets['user'])
-                inputs[1].fill(secrets['pass'])
-                time.sleep(1) # 稍微停頓模擬真人
-            
-            # 點擊登入按鈕 (同時支援中英文)
-            login_btn = page.locator('button[type="submit"], div[role="button"]:has-text("登入"), div[role="button"]:has-text("Log in")').first
-            login_btn.click()
-            
-            # 等待跳轉，時間給長一點，因為登入有時候會卡
-            page.wait_for_url("https://www.threads.net/", timeout=60000)
-            print("✅ 登入成功！")
+        # 把通行證塞進瀏覽器
+        context.add_cookies([{
+            'name': 'sessionid',
+            'value': session_id,
+            'domain': '.threads.net',
+            'path': '/',
+            'secure': True,
+            'httpOnly': True,
+            'sameSite': 'Lax'
+        }])
+        
+        # 直接跳轉到首頁，確認是否登入
+        page.goto("https://www.threads.net/")
+        time.sleep(5) # 等待載入
+        
+        # 檢查有沒有「建立內容」的按鈕，有的話就代表成功了
+        if page.query_selector('svg[aria-label="建立內容"]'):
+            print("✅ Cookie 登入成功！已繞過驗證碼。")
+        else:
+            page.screenshot(path="debug.png")
+            print("❌ Cookie 失敗，可能已過期或 Session ID 錯誤。")
+            return
             
         except Exception as e:
             # 如果還是失敗，截一張圖存下來，方便我們 debug
@@ -145,6 +150,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
