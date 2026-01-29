@@ -8,9 +8,9 @@ from googleapiclient.http import MediaIoBaseDownload
 from playwright.sync_api import sync_playwright
 
 # --- 配置區 ---
-# 這裡只認 ID，前面的 name 只是給你看日誌用的
+# 已經更新 Episode 1 的 ID 為 1Ba2FHg...
 FOLDER_LIST = [
-    {'name': 'Episode 1', 'id': '1ej8KQ7dV5Vi2DvpJ0rw-Bv17T3DTisma'},
+    {'name': 'Episode 1', 'id': '1Ba2FHg9U4CCp5ZRloeObj3w9k0B0FN_m'},
     {'name': 'Episode 4', 'id': '1TyKoUKlsuARHQ59gViPU4H9SKT2JbERD'},
     {'name': 'Episode 5', 'id': '1NW98O1i6EkO_SlZWqLtNBO78N-vveugw'},
     {'name': 'Episode 6', 'id': '1F6vmpH2PCZ-H8qQ1OGxFDqEJBmS_zJ9k'},
@@ -24,26 +24,32 @@ FOLDER_LIST = [
 ]
 PROGRESS_FILE = 'progress.txt'
 
-def download_image(service, folder_id, filename):
-    """強力下載：只認 ID 與檔案名稱，不分大小寫"""
+def download_image(service, folder_id, target_idx):
+    """強力下載：列出檔案並比對序號"""
     try:
-        # 列出該 ID 資料夾下的所有內容
         results = service.files().list(
             q=f"'{folder_id}' in parents and trashed = false",
-            fields="files(id, name)"
+            fields="files(id, name)",
+            pageSize=100
         ).execute()
         items = results.get('files', [])
         
+        if not items:
+            print(f"❌ 資料夾 ID [{folder_id}] 是空的！")
+            return None
+
+        # 匹配 frame_0001, frame_1 等格式
+        target_patterns = [f"frame_{target_idx:04d}", f"frame_{target_idx}"]
+        
         target_id = None
         for item in items:
-            # 去掉空格後比對檔名
-            if filename.lower().replace(" ", "") in item['name'].lower().replace(" ", ""):
+            name_lower = item['name'].lower()
+            if any(p.lower() in name_lower for p in target_patterns):
                 target_id = item['id']
-                print(f"✅ 成功找到檔案: {item['name']}")
+                print(f"🎯 找到檔案: {item['name']}")
                 break
         
-        if not target_id:
-            return None
+        if not target_id: return None
 
         request = service.files().get_media(fileId=target_id)
         fh = io.BytesIO()
@@ -51,12 +57,11 @@ def download_image(service, folder_id, filename):
         done = False
         while not done:
             _, done = downloader.next_chunk()
-        
         with open("temp.jpg", "wb") as f:
             f.write(fh.getbuffer())
         return "temp.jpg"
     except Exception as e:
-        print(f"❌ Drive API 錯誤: {e}")
+        print(f"❌ Drive 錯誤: {e}")
         return None
 
 def main():
@@ -78,34 +83,28 @@ def main():
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={'width': 1280, 'height': 800}, locale="zh-TW")
         page = context.new_page()
-
-        print("🔑 注入 Session...")
         context.add_cookies([{'name': 'sessionid', 'value': session_id, 'domain': '.threads.net', 'path': '/'}])
         
         for i in range(6):
             if f_idx >= len(FOLDER_LIST): break
             folder = FOLDER_LIST[f_idx]
-            filename = f"frame_{i_idx:04d}.jpg"
-            print(f"📸 正在讀取 {folder['name']} 的 {filename}...")
+            print(f"🔎 正在處理 {folder['name']} / 第 {i_idx} 張...")
             
-            img_path = download_image(drive_service, folder['id'], filename)
+            img_path = download_image(drive_service, folder['id'], i_idx)
             
             if not img_path:
-                print(f"⏭️ 在 ID [{folder['id']}] 中找不到 {filename}，跳轉下一集")
+                print(f"⏭️ 找不到檔案，跳轉下一集")
                 f_idx += 1; i_idx = 1; continue
 
             try:
                 page.goto("https://www.threads.net/")
                 time.sleep(15)
                 
-                # 點擊建立按鈕
                 btn = page.locator('svg[aria-label*="建立"], svg[aria-label*="thread"], div[role="button"]:has-text("建立")').first
                 btn.click(force=True)
-                
                 page.wait_for_selector('div[role="textbox"]', timeout=30000)
                 
-                mm, ss = divmod(i_idx, 60)
-                content = f"BanG Dream! It's MyGO!!!!! {folder['name']} - {mm:02d}:{ss:02d}"
+                content = f"BanG Dream! It's MyGO!!!!! {folder['name']} - {i_idx}"
                 page.fill('div[role="textbox"]', content)
                 
                 with page.expect_file_chooser() as fc_info:
@@ -116,13 +115,13 @@ def main():
                 time.sleep(20) 
                 
                 page.click('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")')
-                print(f"🎉 成功發佈 ({i+1}/6)")
+                print(f"🎉 成功發佈貼文！")
 
                 i_idx += 1
                 with open(PROGRESS_FILE, 'w') as f: f.write(f"{f_idx},{i_idx}")
                 if i < 5: time.sleep(600)
             except Exception as e:
-                print(f"❌ 發文異常: {e}")
+                print(f"❌ 錯誤: {e}")
                 break
         browser.close()
 
