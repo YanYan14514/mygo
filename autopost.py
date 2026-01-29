@@ -65,7 +65,6 @@ def main():
             if line: f_idx, i_idx = map(int, line.split(','))
 
     with sync_playwright() as p:
-        # 使用真實的瀏覽器特徵
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={'width': 1280, 'height': 800},
@@ -73,34 +72,32 @@ def main():
         )
         page = context.new_page()
 
-        print("🌐 正在開啟 Threads 登入頁面...")
+        print("🌐 進入登入頁面...")
         page.goto("https://www.threads.net/login", wait_until="networkidle")
-        time.sleep(10)
+        time.sleep(8)
 
-        # 處理 Instagram 登入框架 (iframe)
-        print("⌨️ 正在嘗試登入...")
+        print("⌨️ 嘗試填寫帳密...")
         try:
-            # 優先嘗試直接填寫
-            page.get_by_label("手機號碼、用戶名稱或電子郵件").or_(page.locator('input[name="username"]')).fill(username)
-            time.sleep(1)
-            page.get_by_label("密碼").or_(page.locator('input[name="password"]')).fill(password)
-            time.sleep(1)
-            page.get_by_role("button", name=re.compile(r"登入|Log in", re.I)).click()
+            # 針對 Instagram 登入欄位
+            page.wait_for_selector('input[name="username"]', timeout=15000)
+            page.fill('input[name="username"]', username)
+            page.fill('input[name="password"]', password)
+            page.click('button[type="submit"]')
         except:
-            # 如果上面失敗，改用 Tab 盲填
+            print("⚠️ 找不到標準欄位，嘗試 Tab 盲填...")
             page.keyboard.press("Tab")
             time.sleep(0.5)
-            page.keyboard.type(username, delay=100)
+            page.keyboard.type(username)
             page.keyboard.press("Tab")
             time.sleep(0.5)
-            page.keyboard.type(password, delay=100)
+            page.keyboard.type(password)
             page.keyboard.press("Enter")
 
-        print("⏳ 等待跳轉至主頁（40秒）...")
+        print("⏳ 等待登入跳轉（40秒）...")
         time.sleep(40)
         page.screenshot(path="after_login_attempt.png")
 
-        # 檢查是否登入成功
+        # 開始發文流程
         for i in range(3):
             if f_idx >= len(FOLDER_LIST): break
             folder = FOLDER_LIST[f_idx]
@@ -114,42 +111,38 @@ def main():
                 page.goto("https://www.threads.net/intent/post", wait_until="networkidle")
                 time.sleep(10)
 
-                # 填寫文字
                 textbox = page.locator('div[role="textbox"]')
                 if not textbox.is_visible():
-                    print("🚨 找不到發文框，可能登入已失效。")
-                    page.screenshot(path="post_failed_no_textbox.png")
+                    print("🚨 登入可能失敗，找不到發文框。")
+                    page.screenshot(path="no_textbox.png")
                     break
                 
                 textbox.fill(f"BanG Dream! It's MyGO!!!!! {folder['name']} - Frame {i_idx}")
-                time.sleep(2)
-
-                # 上傳圖片
-                async with page.expect_file_chooser() as fc_info:
-                    # 點擊媒體圖示
+                
+                # 修正：同步模式下的 expect_file_chooser
+                with page.expect_file_chooser() as fc_info:
                     page.locator('svg[aria-label*="媒體"], svg[aria-label*="附加"], svg[aria-label*="Attach"]').first.click()
-                fc_info.value.set_files(img_path)
-                print("📤 圖片上傳中...")
-                time.sleep(12) # 給圖片一點上傳時間
+                file_chooser = fc_info.value
+                file_chooser.set_files(img_path)
+                
+                print("📤 上傳中...")
+                time.sleep(12)
 
-                # 點擊發佈
                 post_btn = page.locator('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")').first
                 if post_btn.is_enabled():
                     post_btn.click()
-                    print(f"🎉 成功發佈：{folder['name']} - {i_idx}")
+                    print(f"🎉 成功：{folder['name']} - {i_idx}")
                     time.sleep(10)
                     
-                    # 更新進度
                     i_idx += 1
                     with open(PROGRESS_FILE, 'w') as f:
                         f.write(f"{f_idx},{i_idx}")
                 else:
-                    print("❌ 發佈按鈕無法點擊")
-                    page.screenshot(path="post_btn_disabled.png")
+                    print("❌ 按鈕不可點擊")
+                    break
 
             except Exception as e:
-                print(f"❌ 發佈過程出錯: {e}")
-                page.screenshot(path=f"error_step_{i}.png")
+                print(f"❌ 錯誤: {e}")
                 break
 
         browser.close()
