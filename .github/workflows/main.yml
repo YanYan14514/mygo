@@ -1,9 +1,9 @@
 name: MyGO Threads Autopost
 
 on:
-  workflow_dispatch: # 讓你可以手動點擊執行
+  workflow_dispatch:
   schedule:
-    - cron: '0 */4 * * *' # 每 4 小時自動執行一次，你可以根據需求調整
+    - cron: '0 */4 * * *'
 
 jobs:
   build:
@@ -16,7 +16,7 @@ jobs:
       - name: 設定 Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # 升級到 3.11 避開之前的警告
+          python-version: '3.11'
 
       - name: 安裝依賴
         run: |
@@ -27,21 +27,22 @@ jobs:
       - name: 執行自動發文
         env:
           GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
-          THREADS_SESSION_ID: ${{ secrets.THREADS_SESSION_ID }}
-          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
-          THREADS_CSRF_TOKEN: ${{ secrets.THREADS_CSRF_TOKEN }}
+          THREADS_USERNAME: ${{ secrets.THREADS_USERNAME }}
+          THREADS_PASSWORD: ${{ secrets.THREADS_PASSWORD }}
         run: python autopost.py
 
-      - name: 儲存錯誤截圖 (如果失敗的話)
-        if: failure()
+      - name: 儲存偵錯資料
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-screenshots
+          name: debug-results
           path: |
             *.png
             temp.jpg
+            progress.txt
 
       - name: 提交進度更新
+        if: success()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
