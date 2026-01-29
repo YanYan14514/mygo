@@ -25,22 +25,47 @@ PROGRESS_FILE = 'progress.txt'
 
 def download_image(service, folder_id, target_idx):
     try:
+        # 1. 獲取檔案清單並排序
         results = service.files().list(
             q=f"'{folder_id}' in parents and trashed = false",
             fields="files(id, name)",
             pageSize=1000
         ).execute()
-        items = sorted(results.get('files', []), key=lambda x: x['name'])
-        if not items: return None
+        items = results.get('files', [])
+        
+        if not items:
+            print(f"❌ 資料夾是空的 (ID: {folder_id})")
+            return None
+
+        # --- 診斷：印出前 10 個檔名 ---
+        items.sort(key=lambda x: x['name'])
+        print(f"📁 診斷資料夾: 總共 {len(items)} 個檔案")
+        print(f"📋 檔名前 10 名: {[i['name'] for i in items[:10]]}")
+
+        # 2. 多重格式匹配
+        target_patterns = [
+            f"frame_{target_idx:04d}", 
+            f"frame_{target_idx}.", 
+            f"_{target_idx:04d}.",
+            f"img_{target_idx:04d}"
+        ]
+        
         target_id = None
-        target_name = f"frame_{target_idx:04d}"
         for item in items:
-            if target_name in item['name']:
-                target_id = item['id']; break
+            name_lower = item['name'].lower()
+            if any(p.lower() in name_lower for p in target_patterns):
+                target_id = item['id']
+                print(f"🎯 匹配成功: {item['name']}")
+                break
+        
+        # 3. 如果找不到特定序號，且是剛開始，抓排序後第一個
         if not target_id and target_idx == 1:
             target_id = items[0]['id']
-            print(f"⚠️ 找不到 0001，抓取首個: {items[0]['name']}")
+            print(f"⚠️ 找不到對應編號，改抓資料夾內第一個檔案: {items[0]['name']}")
+
         if not target_id: return None
+
+        # 4. 下載
         request = service.files().get_media(fileId=target_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -49,14 +74,16 @@ def download_image(service, folder_id, target_idx):
         with open("temp.jpg", "wb") as f: f.write(fh.getbuffer())
         return "temp.jpg"
     except Exception as e:
-        print(f"❌ Drive 錯誤: {e}"); return None
+        print(f"❌ Drive 下載錯誤: {e}"); return None
 
 def main():
     gdrive_json = os.getenv('GDRIVE_JSON')
     session_id = os.getenv('THREADS_SESSION_ID')
     if not gdrive_json or not session_id: return
+
     creds = service_account.Credentials.from_service_account_info(json.loads(gdrive_json))
     drive_service = build('drive', 'v3', credentials=creds)
+
     if not os.path.exists(PROGRESS_FILE): f_idx, i_idx = 0, 1
     else:
         with open(PROGRESS_FILE, 'r') as f:
@@ -65,10 +92,9 @@ def main():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # 使用更擬真的 User Agent
         context = browser.new_context(
-            viewport={'width': 1280, 'height': 1024},
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            viewport={'width': 1280, 'height': 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         page = context.new_page()
         context.add_cookies([{'name': 'sessionid', 'value': session_id, 'domain': '.threads.net', 'path': '/'}])
@@ -76,51 +102,48 @@ def main():
         for i in range(6):
             if f_idx >= len(FOLDER_LIST): break
             folder = FOLDER_LIST[f_idx]
-            print(f"🚀 處理集數: {folder['name']} / 第 {i_idx} 張")
+            print(f"🚀 正在處理: {folder['name']} / 進度: 第 {i_idx} 張圖")
+            
             img_path = download_image(drive_service, folder['id'], i_idx)
-            if not img_path: f_idx += 1; i_idx = 1; continue
+            if not img_path:
+                print("⏭️ 找不到檔案，跳集")
+                f_idx += 1; i_idx = 1; continue
 
             try:
-                # 1. 進入頁面
+                # 模擬真人流程：首頁 -> 發文頁
+                page.goto("https://www.threads.net/", wait_until="networkidle", timeout=60000)
+                time.sleep(5)
                 page.goto("https://www.threads.net/intent/post", wait_until="networkidle", timeout=60000)
-                time.sleep(15) # 給予極長等待
+                time.sleep(12)
                 
-                # 2. 自動處理「登入/切換帳號」攔截框 (如果有出現的話)
-                login_interceptor = page.locator('div[role="button"]:has-text("繼續"), div[role="button"]:has-text("登入")').first
-                if login_interceptor.is_visible():
-                    print("🛡️ 偵測到登入確認框，嘗試跳過...")
-                    login_interceptor.click()
-                    time.sleep(10)
+                # 若沒出現輸入框，嘗試截圖診斷
+                if not page.locator('div[role="textbox"]').is_visible():
+                    page.screenshot(path=f"blocked_notice_{i}.png")
+                    print("🕵️ 頁面未就緒，嘗試點擊潛在彈窗...")
+                    for txt in ["繼續", "同意", "確定"]:
+                        btn = page.get_by_role("button", name=txt)
+                        if btn.is_visible(): btn.click(); time.sleep(5)
 
-                # 3. 等待輸入框 (改用更穩定的 locator)
                 page.wait_for_selector('div[role="textbox"]', timeout=30000)
                 textbox = page.locator('div[role="textbox"]')
-                content = f"BanG Dream! It's MyGO!!!!! {folder['name']} - {i_idx}"
-                textbox.fill(content)
+                textbox.fill(f"BanG Dream! It's MyGO!!!!! {folder['name']} - Frame {i_idx}")
                 
-                # 4. 上傳
                 with page.expect_file_chooser() as fc_info:
                     page.locator('svg[aria-label*="媒體"], svg[aria-label*="附加"]').first.click()
                 fc_info.value.set_files(img_path)
                 
-                print("📤 上傳中...")
+                print("📤 圖片上傳中...")
                 time.sleep(20) 
                 
-                # 5. 發佈
-                post_btn = page.locator('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")').first
-                post_btn.click()
+                page.locator('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")').first.click()
+                print(f"🎉 成功發佈！")
                 
-                print(f"🎉 成功發佈 ({i+1}/6)")
                 i_idx += 1
                 with open(PROGRESS_FILE, 'w') as f: f.write(f"{f_idx},{i_idx}")
                 if i < 5: time.sleep(600)
             except Exception as e:
                 print(f"❌ Threads 錯誤: {e}")
-                # 儲存錯誤截圖以便除錯
-                page.screenshot(path=f"debug_screen_{i}.png")
-                # 如果是 Session 過期，就沒必要繼續試下一張了
-                if "timeout" in str(e).lower():
-                    print("💡 建議：請檢查你的 THREADS_SESSION_ID 是否需要更新。")
+                page.screenshot(path=f"final_error_{i}.png")
                 break
         browser.close()
 
