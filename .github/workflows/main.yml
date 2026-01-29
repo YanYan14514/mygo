@@ -23,9 +23,10 @@ jobs:
           playwright install chromium
       - name: Run Script
         env:
-          # 重點在下面這兩行，要把鑰匙傳進去
-          GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
-          THREADS_SESSION_ID: ${{ secrets.THREADS_SESSION_ID }}
+        GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
+        THREADS_SESSION_ID: ${{ secrets.THREADS_SESSION_ID }}
+        THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+        THREADS_CSRF_TOKEN: ${{ secrets.THREADS_CSRF_TOKEN }}
         run: |
           python autopost.py
           git config --global user.name "github-actions[bot]"
