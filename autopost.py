@@ -28,8 +28,7 @@ def download_image(service, folder_id, target_idx):
         results = service.files().list(q=f"'{folder_id}' in parents and trashed = false", fields="files(id, name)", pageSize=1000).execute()
         items = sorted(results.get('files', []), key=lambda x: x['name'])
         if not items: return None
-        first_name = items[0]['name']
-        match = re.search(r'(\d+)', first_name)
+        match = re.search(r'(\d+)', items[0]['name'])
         if not match: return None
         actual_num = int(match.group(1)) + (target_idx - 1)
         actual_pattern = f"{actual_num:04d}"
@@ -58,10 +57,11 @@ def main():
             f_idx, i_idx = map(int, line.split(',')) if line else (0, 1)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # 使用更低階的啟動參數避開偵測
+        browser = p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
         context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            viewport={'width': 1280, 'height': 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = context.new_page()
         context.add_cookies([{'name': 'sessionid', 'value': session_id, 'domain': '.threads.net', 'path': '/'}])
@@ -73,63 +73,50 @@ def main():
             if not img_path: f_idx += 1; i_idx = 1; continue
 
             try:
-                print(f"🌐 正在導向 Threads 發文頁面...")
-                page.goto("https://www.threads.net/intent/post", wait_until="load", timeout=90000)
-                time.sleep(20)
+                print(f"🏠 正在進入 Threads 主頁...")
+                page.goto("https://www.threads.net/", wait_until="networkidle")
+                time.sleep(10)
                 
-                # 點擊螢幕中央來確保焦點
-                page.mouse.click(500, 500)
-                time.sleep(2)
+                # 檢查是否被導向登入頁
+                if "login" in page.url:
+                    print("🚨 已被導向登入頁面，Session ID 可能失效！")
+                    break
 
-                # 嘗試自動點擊「繼續」按鈕（如果有）
-                for btn_text in ["繼續", "Continue", "Log in", "登入"]:
-                    btn = page.get_by_role("button", name=re.compile(btn_text, re.I))
-                    if btn.is_visible():
-                        print(f"👆 點擊了: {btn_text}")
-                        btn.click()
-                        time.sleep(10)
+                # 點擊「建立」按鈕
+                create_btn = page.locator('svg[aria-label*="建立"], div[role="button"]:has-text("建立")').first
+                create_btn.click()
+                print("🖱️ 點擊建立按鈕...")
+                time.sleep(5)
 
-                # 如果 textbox 還是沒出現，嘗試用鍵盤呼叫
-                if not page.locator('div[role="textbox"]').is_visible():
-                    print("⌨️ 嘗試模擬鍵盤操作喚醒輸入框...")
-                    page.keyboard.press("Tab")
-                    time.sleep(2)
-
-                page.wait_for_selector('div[role="textbox"]', timeout=40000)
+                # 等待彈窗內的輸入框
+                page.wait_for_selector('div[role="textbox"]', timeout=30000)
                 textbox = page.locator('div[role="textbox"]')
                 
-                # 計算時間
-                mm, ss = divmod(i_idx, 60)
-                caption = f"BanG Dream! It's MyGO!!!!! {folder['name']} - {mm:02d}:{ss:02d}"
+                caption = f"BanG Dream! It's MyGO!!!!! {folder['name']} - Frame {i_idx}"
                 textbox.fill(caption)
                 
                 # 上傳圖片
                 with page.expect_file_chooser() as fc_info:
-                    # 使用多種可能標籤尋找媒體按鈕
-                    media_btn = page.locator('svg[aria-label*="媒體"], svg[aria-label*="附加"], svg[aria-label*="Attach"]').first
-                    media_btn.click(force=True)
+                    page.locator('svg[aria-label*="媒體"], svg[aria-label*="附加"]').first.click()
                 fc_info.value.set_files(img_path)
                 
-                print(f"📤 圖片已加入，準備發佈 {folder['name']} / {i_idx}...")
+                print(f"📤 準備發佈 {folder['name']} / {i_idx}...")
                 time.sleep(15) 
                 
-                # 點擊發佈
+                # 點擊發佈 (加上點擊後的確認)
                 publish_btn = page.locator('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")').first
-                publish_btn.click(force=True)
+                publish_btn.click()
                 
-                # 等待完成
-                time.sleep(15)
-                print(f"🎉 成功發佈第 {i+1} 篇！")
+                # 驗證是否成功 (等待按鈕消失或出現成功字樣)
+                time.sleep(10)
+                print(f"🎉 成功發佈！")
                 
                 i_idx += 1
                 with open(PROGRESS_FILE, 'w') as f: f.write(f"{f_idx},{i_idx}")
-                if i < 5: time.sleep(300)
+                if i < 5: time.sleep(600)
             except Exception as e:
-                print(f"❌ 發生錯誤: {e}")
-                page.screenshot(path=f"error_snap_{i}.png")
-                # 檢測是否被要求登入
-                if "login" in page.url.lower():
-                    print("🚨 警告：Session 已失效，請更新 THREADS_SESSION_ID Secret！")
+                print(f"❌ 錯誤: {e}")
+                page.screenshot(path=f"fail_at_{i}.png")
                 break
         browser.close()
 
