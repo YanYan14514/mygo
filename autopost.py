@@ -16,11 +16,14 @@ FOLDER_LIST = [
 ]
 PROGRESS_FILE = 'progress.txt'
 
-def download_image(service, folder_id, target_idx):
-    try:
-        results = service.files().list(q=f"'{folder_id}' in parents and trashed = false", fields="files(id, name)", pageSize=1000).execute()
-        items = sorted(results.get('files', []), key=lambda x: x['name'])
-        if not items: return None
+def main():
+    # 讀取並強制轉換為字串，避免 GitHub 傳入奇怪的格式
+    session_id = str(os.getenv('THREADS_SESSION_ID', '')).strip()
+    gdrive_json = os.getenv('GDRIVE_JSON')
+    
+    if not session_id or session_id == "None":
+        print("❌ 錯誤：未找到 THREADS_SESSION_ID，請檢查 Secrets 設定")
+        return
         # 尋找對應索引的圖片
         target_name_part = f"{target_idx:04d}"
         target_id = next((i['id'] for i in items if target_name_part in i['name']), None)
@@ -106,3 +109,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
