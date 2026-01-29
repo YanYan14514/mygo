@@ -8,9 +8,9 @@ from googleapiclient.http import MediaIoBaseDownload
 from playwright.sync_api import sync_playwright
 
 # --- 配置區 ---
-# 請確保這些 Folder ID 與你的 Google Drive 網址對應
 FOLDER_LIST = [
-    {'name': 'mygo123', 'id': '1Ba2FHg9U4CCp5ZRloeObj3w9k0B0FN_m'},
+    {'name': 'mygo123_part1', 'id': '1ej8KQ7dV5Vi2DvpJ0rw-Bv17T3DTisma'},
+    {'name': 'mygo123_part2', 'id': '1Ba2FHg9U4CCp5ZRloeObj3w9k0B0FN_m'},
     {'name': 'mygo4', 'id': '1TyKoUKlsuARHQ59gViPU4H9SKT2JbERD'},
     {'name': 'mygo5', 'id': '1NW98O1i6EkO_SlZWqLtNBO78N-vveugw'},
     {'name': 'mygo6', 'id': '1F6vmpH2PCZ-H8qQ1OGxFDqEJBmS_zJ9k'},
@@ -51,14 +51,12 @@ def main():
     session_id = os.getenv('THREADS_SESSION_ID')
     
     if not gdrive_json or not session_id:
-        print("❌ 缺少必要的 Secrets 設定 (GDRIVE_JSON 或 THREADS_SESSION_ID)")
+        print("❌ 缺少必要的 Secrets 設定")
         return
 
-    # 初始化 Google Drive
     creds = service_account.Credentials.from_service_account_info(json.loads(gdrive_json))
     drive_service = build('drive', 'v3', credentials=creds)
 
-    # 讀取進度
     if not os.path.exists(PROGRESS_FILE):
         f_idx, i_idx = 0, 1
     else:
@@ -67,39 +65,32 @@ def main():
             f_idx, i_idx = map(int, line.split(',')) if line else (0, 1)
 
     with sync_playwright() as p:
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={'width': 1280, 'height': 720}, user_agent=user_agent, locale="zh-TW")
+        context = browser.new_context(
+            viewport={'width': 1280, 'height': 720},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            locale="zh-TW"
+        )
         page = context.new_page()
 
-        print("🔑 Authorization: 嘗試使用 Session Cookie 登入...")
+        print("🔑 Authorization: 使用 Session Cookie...")
         context.add_cookies([{
             'name': 'sessionid', 'value': session_id, 'domain': '.threads.net',
             'path': '/', 'secure': True, 'httpOnly': True, 'sameSite': 'Lax'
         }])
         
         try:
-            print("🌐 正在開啟 Threads 頁面...")
             page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=90000)
-            time.sleep(10) # 等待頁面渲染
-            
-            # 偵測登入狀態
+            time.sleep(10)
             post_btn_selector = 'svg[aria-label*="建立"], svg[aria-label*="thread"], svg[aria-label="建立內容"]'
-            if page.query_selector(post_btn_selector):
-                print("✅ Cookie 登入成功！")
-            else:
-                print("⏳ 正在等待發文按鈕出現...")
-                page.wait_for_selector(post_btn_selector, timeout=30000)
-                print("✅ 找到按鈕，登入成功！")
+            page.wait_for_selector(post_btn_selector, timeout=30000)
+            print("✅ 登入成功！")
         except Exception as e:
-            print(f"❌ 登入階段異常: {e}")
-            browser.close()
+            print(f"❌ 登入失敗: {e}")
             return
 
-        # --- 發文循環 (每次執行發 6 張) ---
         for i in range(6):
             if f_idx >= len(FOLDER_LIST):
-                print("🏁 所有資料夾已處理完畢！")
                 break
 
             folder = FOLDER_LIST[f_idx]
@@ -107,58 +98,55 @@ def main():
             print(f"📸 正在搜尋: {folder['name']} / {filename}")
             
             img_path = download_image(drive_service, folder['id'], filename)
-
             if not img_path:
-                print(f"⏭️ 找不到檔案 {filename}，嘗試跳轉到下一個資料夾")
+                print(f"⏭️ 找不到檔案，跳下一集")
                 f_idx += 1
                 i_idx = 1
                 continue
 
             try:
-                # 確保在首頁
-                if page.url != "https://www.threads.net/":
-                    page.goto("https://www.threads.net/")
-                
-                # 1. 點擊發文按鈕
+                page.goto("https://www.threads.net/")
                 page.wait_for_selector(post_btn_selector, timeout=30000)
+                time.sleep(5)
                 page.click(post_btn_selector, force=True)
                 
-                # 2. 等待輸入框出現
-                page.wait_for_selector('div[role="textbox"]', timeout=30000)
-                time.sleep(2)
-                
-                # 3. 準備內容
+                # 等待輸入框，若沒出現補點一次
+                try:
+                    page.wait_for_selector('div[role="textbox"]', timeout=15000)
+                except:
+                    print("⚠️ 補點發文按鈕...")
+                    page.click(post_btn_selector, force=True)
+                    page.wait_for_selector('div[role="textbox"]', timeout=15000)
+
+                time.sleep(3)
                 mm, ss = divmod(i_idx, 60)
                 ep_name = folder['name'].replace('mygo', '').replace('123_part1', '1').replace('123_part2', '1')
                 content = f"BanG Dream! It's MyGO!!!!! 第 {ep_name} 集 {mm:02d}:{ss:02d}"
                 
-                # 4. 填寫文字與上傳圖片
-                page.fill('div[role="textbox"]', content)
+                page.focus('div[role="textbox"]')
+                page.keyboard.type(content, delay=100)
+                
                 with page.expect_file_chooser() as fc_info:
-                    page.click('svg[aria-label*="附加"], svg[aria-label*="Attach"]')
+                    page.click('svg[aria-label*="附加"], svg[aria-label*="Attach"]', force=True)
                 fc_info.value.set_files(img_path)
                 
-                print(f"📤 圖片上傳中... ({content})")
-                time.sleep(15) # 給予充足的上傳時間
+                print("📤 上傳中...")
+                time.sleep(15) 
                 
-                # 5. 點擊發佈
-                post_confirm_selector = 'div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")'
-                page.click(post_confirm_selector)
-                
-                print(f"🎉 成功發佈第 {i+1} 張圖片！")
+                post_confirm = 'div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")'
+                page.click(post_confirm)
+                print(f"🎉 成功發佈 ({i+1}/6): {content}")
 
-                # 更新進度
                 i_idx += 1
                 with open(PROGRESS_FILE, 'w') as f:
                     f.write(f"{f_idx},{i_idx}")
                 
                 if i < 5:
-                    print("⏳ 等待 600 秒後處理下一張...")
+                    print("⏳ 等待 600 秒...")
                     time.sleep(600)
-                    
             except Exception as e:
-                print(f"❌ 發文過程出錯: {e}")
-                page.screenshot(path=f"error_step_{i}.png")
+                page.screenshot(path=f"error_{i}.png")
+                print(f"❌ 發文出錯: {e}")
                 break
                 
         browser.close()
