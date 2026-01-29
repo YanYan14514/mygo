@@ -52,25 +52,38 @@ def main():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={'width': 1280, 'height': 720})
-        page = context.new_page()
-
-        print("🔑 正在登入 Threads...")
-        page.goto("https://www.threads.net/login")
         # 登入 Threads
         print("🔑 正在登入 Threads...")
-        page.goto("https://www.threads.net/login")
+        # 設定 User-Agent 偽裝成一般的電腦瀏覽器，避免被當成機器人擋掉
+        context.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"})
         
-        # 使用更穩定的選擇器 (根據 Threads 原始碼)
-        page.wait_for_selector('input[name="username"]', timeout=60000)
-        page.fill('input[name="username"]', secrets['user'])
-        page.fill('input[name="password"]', secrets['pass'])
+        page.goto("https://www.threads.net/login", wait_until="networkidle")
         
-        # 點擊登入按鈕
-        page.click('div[role="button"]:has-text("登入"), div[role="button"]:has-text("Log in")')
-        page.click('div[role="button"]:has-text("登入")')
-        page.wait_for_url("https://www.threads.net/", timeout=60000)
-        print("✅ 登入成功！")
+        # 嘗試多種可能的輸入框定位
+        try:
+            page.wait_for_selector('input', timeout=60000)
+            # 抓取頁面上第一個和第二個輸入框
+            inputs = page.query_selector_all('input')
+            if len(inputs) >= 2:
+                inputs[0].fill(secrets['user'])
+                inputs[1].fill(secrets['pass'])
+            else:
+                # 備用方案：如果上面的沒抓到，改用屬性抓
+                page.type('input[name="username"], input[type="text"]', secrets['user'])
+                page.type('input[name="password"], input[type="password"]', secrets['pass'])
+            
+            # 點擊任何看起來像登入的按鈕
+            page.click('button[type="submit"], div[role="button"]:has-text("登入"), div[role="button"]:has-text("Log in")')
+            
+            # 等待跳轉到首頁 (代表登入成功)
+            page.wait_for_url("https://www.threads.net/", timeout=60000)
+            print("✅ 登入成功！")
+            
+        except Exception as e:
+            # 如果還是失敗，截一張圖存下來，方便我們 debug
+            page.screenshot(path="login_error.png")
+            print(f"❌ 登入失敗或超時，已截圖存檔。錯誤: {e}")
+            raise
 
         for i in range(6):
             if not os.path.exists(PROGRESS_FILE):
@@ -126,4 +139,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
