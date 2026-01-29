@@ -10,17 +10,17 @@ from playwright.sync_api import sync_playwright
 # --- 配置區 ---
 # 這裡的名字改為跟你的雲端硬碟完全一致 (大小寫要注意)
 FOLDER_LIST = [
-    {'name': 'MyGo123', 'id': '1ej8KQ7dV5Vi2DvpJ0rw-Bv17T3DTisma'},
-    {'name': 'Mygo4', 'id': '1TyKoUKlsuARHQ59gViPU4H9SKT2JbERD'},
-    {'name': 'Mygo5', 'id': '1NW98O1i6EkO_SlZWqLtNBO78N-vveugw'},
-    {'name': 'Mygo6', 'id': '1F6vmpH2PCZ-H8qQ1OGxFDqEJBmS_zJ9k'},
-    {'name': 'Mygo7', 'id': '11-IHOKWb4PR9aCxJtieJxgCfQ3OTh5H7'},
-    {'name': 'Mygo8', 'id': '1IJtDejmjTNVFOEFyCumvDzWgCND-HQmA'},
-    {'name': 'Mygo9', 'id': '14keTQu3tqM3qSYcECLd3ub3MzTP6LC5F'},
-    {'name': 'Mygo10', 'id': '11LK0p3lr8S_Gn_ZLiSIOjaI5gSoNAnCZ'},
-    {'name': 'Mygo11', 'id': '1RVE45ulNjLMZ9iypOUzZZDUnAUKavkQK'},
-    {'name': 'Mygo12', 'id': '1CHTpS_abB6SsLcgQBCMtLhKnKgMbLjgd'},
-    {'name': 'Mygo13', 'id': '1cVtofiJZDEbhNlNhtHcg0DOEO6nPsCPf'}
+    {'name': 'mygo123', 'id': '1ej8KQ7dV5Vi2DvpJ0rw-Bv17T3DTisma'},
+    {'name': 'mygo4', 'id': '1TyKoUKlsuARHQ59gViPU4H9SKT2JbERD'},
+    {'name': 'mygo5', 'id': '1NW98O1i6EkO_SlZWqLtNBO78N-vveugw'},
+    {'name': 'mygo6', 'id': '1F6vmpH2PCZ-H8qQ1OGxFDqEJBmS_zJ9k'},
+    {'name': 'mygo7', 'id': '11-IHOKWb4PR9aCxJtieJxgCfQ3OTh5H7'},
+    {'name': 'mygo8', 'id': '1IJtDejmjTNVFOEFyCumvDzWgCND-HQmA'},
+    {'name': 'mygo9', 'id': '14keTQu3tqM3qSYcECLd3ub3MzTP6LC5F'},
+    {'name': 'mygo10', 'id': '11LK0p3lr8S_Gn_ZLiSIOjaI5gSoNAnCZ'},
+    {'name': 'mygo11', 'id': '1RVE45ulNjLMZ9iypOUzZZDUnAUKavkQK'},
+    {'name': 'mygo12', 'id': '1CHTpS_abB6SsLcgQBCMtLhKnKgMbLjgd'},
+    {'name': 'mygo13', 'id': '1cVtofiJZDEbhNlNhtHcg0DOEO6nPsCPf'}
 ]
 PROGRESS_FILE = 'progress.txt'
 
@@ -162,3 +162,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
