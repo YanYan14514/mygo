@@ -63,17 +63,50 @@ def main():
         )
         page = context.new_page()
 
-        print("🔐 正在執行自動登入...")
-        page.goto("https://www.threads.net/login", wait_until="networkidle")
-        time.sleep(5)
+        print("🔐 正在開啟登入頁面...")
+        page.goto("https://www.threads.net/login", wait_until="networkidle", timeout=60000)
+        time.sleep(10)
         
-        # 輸入帳密
-        page.fill('input[placeholder*="帳號"], input[name="username"]', username)
-        page.fill('input[placeholder*="密碼"], input[name="password"]', password)
-        page.click('button[type="submit"]')
-        
-        print("⏳ 等待登入跳轉...")
+        # 截圖存檔，看看現在長怎樣
+        page.screenshot(path="login_page_init.png")
+
+        try:
+            # 1. 嘗試點擊「允許所有 Cookie」或類似的按鈕（如果有的話）
+            cookie_btn = page.get_by_role("button", name=re.compile(r"允許|Allow|Accept", re.I))
+            if cookie_btn.is_visible():
+                cookie_btn.click()
+                print("🍪 已點擊 Cookie 同意按鈕")
+                time.sleep(2)
+
+            # 2. 使用更精確的選擇器填寫帳號密碼
+            print("⌨️ 嘗試填寫帳密...")
+            # 帳號框通常有 name="session[username_or_email]" 或單純 username
+            page.wait_for_selector('input', timeout=20000)
+            
+            # 暴力搜尋：直接找所有 input，看哪一個像帳號
+            page.locator('input[name*="username"]').fill(username)
+            page.locator('input[name*="password"]').fill(password)
+            
+            print("點擊登入按鈕...")
+            # 登入按鈕通常是 submit 或是包含「登入/Log in」字樣
+            page.locator('button[type="submit"], div[role="button"]:has-text("登入"), div[role="button"]:has-text("Log in")').first.click()
+            
+        except Exception as e:
+            print(f"⚠️ 登入填寫階段失敗: {e}")
+            page.screenshot(path="login_fill_error.png")
+            # 如果失敗，嘗試最後一招：模擬 Tab 鍵
+            print("⌨️ 嘗試模擬 Tab 鍵填寫...")
+            page.keyboard.press("Tab")
+            time.sleep(1)
+            page.keyboard.type(username)
+            page.keyboard.press("Tab")
+            time.sleep(1)
+            page.keyboard.type(password)
+            page.keyboard.press("Enter")
+
+        print("⏳ 等待登入跳轉中...")
         time.sleep(15)
+        page.screenshot(path="after_login_attempt.png")
         
         # 處理「儲存登入資訊」或「稍後再說」的彈窗
         for _ in range(2):
@@ -118,3 +151,4 @@ def main():
         browser.close()
 
 if __name__ == "__main__": main()
+
