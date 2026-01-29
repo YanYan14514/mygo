@@ -1,13 +1,16 @@
 name: MyGO Threads Autopost
 
 on:
-  workflow_dispatch: # 手動執行
+  workflow_dispatch: # 手動執行按鈕
   schedule:
-    - cron: '0 */4 * * *' # 每 4 小時自動執行一次
+    - cron: '0 */4 * * *' # 每 4 小時自動發一次
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 授予寫入權限，讓 Action 可以更新 progress.txt
+    permissions:
+      contents: write
 
     steps:
       - name: 檢出代碼
@@ -28,9 +31,11 @@ jobs:
         env:
           GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
           THREADS_SESSION_ID: ${{ secrets.THREADS_SESSION_ID }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          THREADS_CSRF_TOKEN: ${{ secrets.THREADS_CSRF_TOKEN }}
         run: python autopost.py
 
-      - name: 儲存偵錯截圖 (失敗時很有用)
+      - name: 儲存偵錯截圖 (方便檢查為何沒發出)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -40,11 +45,11 @@ jobs:
             temp.jpg
             progress.txt
 
-      - name: 自動提交進度更新 (更新 progress.txt)
+      - name: 自動更新進度
         if: success()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add progress.txt
-          git commit -m "Update progress [skip ci]" || echo "No changes to commit"
-          git push
+          # 只有在檔案真的有變動時才提交，避免報錯
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update progress [skip ci]" && git push)
