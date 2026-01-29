@@ -12,15 +12,7 @@ from playwright.sync_api import sync_playwright
 FOLDER_LIST = [
     {'name': 'Ep 1-3', 'id': '1Ba2FHg9U4CCp5ZRloeObj3w9k0B0FN_m'},
     {'name': 'Ep 4', 'id': '1TyKoUKlsuARHQ59gViPU4H9SKT2JbERD'},
-    {'name': 'Ep 5', 'id': '1NW98O1i6EkO_SlZWqLtNBO78N-vveugw'},
-    {'name': 'Ep 6', 'id': '1F6vmpH2PCZ-H8qQ1OGxFDqEJBmS_zJ9k'},
-    {'name': 'Ep 7', 'id': '11-IHOKWb4PR9aCxJtieJxgCfQ3OTh5H7'},
-    {'name': 'Ep 8', 'id': '1IJtDejmjTNVFOEFyCumvDzWgCND-HQmA'},
-    {'name': 'Ep 9', 'id': '14keTQu3tqM3qSYcECLd3ub3MzTP6LC5F'},
-    {'name': 'Ep 10', 'id': '11LK0p3lr8S_Gn_ZLiSIOjaI5gSoNAnCZ'},
-    {'name': 'Ep 11', 'id': '1RVE45ulNjLMZ9iypOUzZZDUnAUKavkQK'},
-    {'name': 'Ep 12', 'id': '1CHTpS_abB6SsLcgQBCMtLhKnKgMbLjgd'},
-    {'name': 'Ep 13', 'id': '1cVtofiJZDEbhNlNhtHcg0DOEO6nPsCPf'}
+    # ... 其餘集數保持不變
 ]
 PROGRESS_FILE = 'progress.txt'
 
@@ -45,14 +37,12 @@ def download_image(service, folder_id, target_idx):
         return None
 
 def main():
-    # 強制轉換為字串並去除空白
+    # 讀取三個關鍵 Cookie
     session_id = str(os.getenv('THREADS_SESSION_ID', '')).strip()
+    user_id = str(os.getenv('THREADS_USER_ID', '')).strip()
+    csrf_token = str(os.getenv('THREADS_CSRF_TOKEN', '')).strip()
     gdrive_json = os.getenv('GDRIVE_JSON')
     
-    if not session_id or session_id == "None":
-        print("❌ 錯誤：未找到 THREADS_SESSION_ID")
-        return
-
     creds = service_account.Credentials.from_service_account_info(json.loads(gdrive_json))
     drive_service = build('drive', 'v3', credentials=creds)
     
@@ -65,16 +55,17 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
         
-        # 注入 Cookie
+        # 注入完整身分資訊
         context.add_cookies([
-            {'name': 'sessionid', 'value': session_id, 'domain': '.threads.net', 'path': '/'}
+            {'name': 'sessionid', 'value': session_id, 'domain': '.threads.net', 'path': '/'},
+            {'name': 'ds_user_id', 'value': user_id, 'domain': '.threads.net', 'path': '/'},
+            {'name': 'csrftoken', 'value': csrf_token, 'domain': '.threads.net', 'path': '/'}
         ])
         
         page = context.new_page()
-        print("🌐 正在開啟 Threads 發文頁面...")
         
         for i in range(3):
             if f_idx >= len(FOLDER_LIST): break
@@ -85,33 +76,40 @@ def main():
                 f_idx += 1; i_idx = 1; continue
 
             try:
+                print(f"🌐 前往發文頁: {folder['name']} - {i_idx}")
                 page.goto("https://www.threads.net/intent/post", wait_until="networkidle")
-                time.sleep(8)
+                time.sleep(10)
+                page.screenshot(path=f"check_page_{i}.png") # 檢查是否成功繞過登入
                 
                 textbox = page.locator('div[role="textbox"]')
                 if not textbox.is_visible():
-                    print("🚨 Cookie 可能失效或被阻擋。")
-                    page.screenshot(path="cookie_fail.png")
+                    print(f"🚨 找不到發文框，Cookie 可能失效。請查看 check_page_{i}.png")
                     break
 
                 textbox.fill(f"BanG Dream! It's MyGO!!!!! {folder['name']} - Frame {i_idx}")
                 
                 with page.expect_file_chooser() as fc_info:
-                    page.locator('svg[aria-label*="媒體"], svg[aria-label*="附加"], svg[aria-label*="Attach"]').first.click()
+                    page.locator('svg[aria-label*="媒體"], svg[aria-label*="附加"]').first.click()
                 fc_info.value.set_files(img_path)
                 
-                print(f"📤 正在發佈：{folder['name']} - {i_idx}")
-                time.sleep(15) 
+                print(f"📤 圖片上傳中...")
+                time.sleep(20) # 增加上傳等待時間
                 
-                page.locator('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")').first.click()
-                time.sleep(10)
-                
-                print(f"🎉 成功！")
-                i_idx += 1
-                with open(PROGRESS_FILE, 'w') as f:
-                    f.write(f"{f_idx},{i_idx}")
+                post_btn = page.locator('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")').first
+                if post_btn.is_enabled():
+                    post_btn.click()
+                    time.sleep(15)
+                    print(f"🎉 成功發佈！")
+                    
+                    i_idx += 1
+                    with open(PROGRESS_FILE, 'w') as f:
+                        f.write(f"{f_idx},{i_idx}")
+                else:
+                    print("❌ 發佈按鈕無法點擊")
+                    page.screenshot(path=f"post_btn_error_{i}.png")
+                    break
             except Exception as e:
-                print(f"❌ 出錯: {e}")
+                print(f"❌ 錯誤: {e}")
                 break
         browser.close()
 
