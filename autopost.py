@@ -46,7 +46,6 @@ def download_image(service, folder_id, filename):
         return None
 
 def main():
-    # 讀取 Secrets
     gdrive_json = os.getenv('GDRIVE_JSON')
     session_id = os.getenv('THREADS_SESSION_ID')
     
@@ -57,7 +56,6 @@ def main():
     creds = service_account.Credentials.from_service_account_info(json.loads(gdrive_json))
     drive_service = build('drive', 'v3', credentials=creds)
 
-    # 讀取初始進度
     if not os.path.exists(PROGRESS_FILE):
         f_idx, i_idx = 0, 1
     else:
@@ -75,7 +73,6 @@ def main():
         )
         page = context.new_page()
 
-        # --- 使用 Cookie 登入 ---
         print("🔑 Authorization: 使用 Session Cookie...")
         context.add_cookies([{
             'name': 'sessionid',
@@ -88,17 +85,22 @@ def main():
         }])
         
         try:
-            page.goto("https://www.threads.net/", wait_until="networkidle")
-            time.sleep(5) 
-            if not page.query_selector('svg[aria-label="建立內容"]'):
-                print("❌ Cookie 登入失敗，請檢查 THREADS_SESSION_ID 是否過期")
-                return
-            print("✅ Cookie 登入成功！")
+            print("🌐 正在開啟 Threads 頁面...")
+            page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=90000)
+            time.sleep(10) 
+            
+            # 偵測中文或英文版的發文按鈕
+            if page.query_selector('svg[aria-label="建立內容"]') or page.query_selector('svg[aria-label="New thread"]'):
+                print("✅ Cookie 登入成功！")
+            else:
+                print("⏳ 找不到發文按鈕，嘗試最後等待...")
+                page.wait_for_selector('svg[aria-label*="建立"], svg[aria-label*="thread"]', timeout=30000)
+                print("✅ Cookie 登入成功！")
         except Exception as e:
-            print(f"❌ 登入過程發生異常: {e}")
+            print(f"❌ 登入失敗或頁面載入過慢: {e}")
             return
 
-        # --- 發文循環 (一次運行發 6 張) ---
+        # --- 發文循環 ---
         for i in range(6):
             if f_idx >= len(FOLDER_LIST):
                 print("🏁 全劇終！")
@@ -110,35 +112,43 @@ def main():
             img_path = download_image(drive_service, folder['id'], filename)
 
             if not img_path:
-                print(f"⏭️ 找不到檔案 {filename}，跳轉至下一集第一張")
+                print(f"⏭️ 找不到檔案 {filename}，跳轉下一集")
                 f_idx += 1
                 i_idx = 1
                 continue
 
             try:
-            # 1. 增加超時到 90 秒，並將等待條件改為 domcontentloaded (只要結構出來就好)
-            print("🌐 正在開啟 Threads 頁面...")
-            page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=90000)
-            
-            # 2. 給一點緩衝時間讓 Cookie 生效
-            time.sleep(10) 
-            
-            # 3. 檢查是否登入成功
-            if page.query_selector('svg[aria-label="建立內容"]') or page.query_selector('svg[aria-label="New thread"]'):
-                print("✅ Cookie 登入成功！")
-            else:
-                # 如果找不到按鈕，可能是首頁還沒載入完，再等一下下
-                print("⏳ 找不到發文按鈕，嘗試最後等待...")
+                page.goto("https://www.threads.net/")
                 page.wait_for_selector('svg[aria-label*="建立"], svg[aria-label*="thread"]', timeout=30000)
-                print("✅ Cookie 登入成功！")
+                page.click('svg[aria-label*="建立"], svg[aria-label*="thread"]')
+                page.wait_for_selector('div[role="textbox"]')
                 
-        except Exception as e:
-            page.screenshot(path="login_error.png") # 失敗時截圖
-            print(f"❌ 登入失敗或頁面載入過慢: {e}")
-            return
+                mm, ss = divmod(i_idx, 60)
+                ep_num = folder['name'].replace('mygo', '').replace('123_part1', '1').replace('123_part2', '1')
+                content = f"BanG Dream! It's MyGO!!!!! 第 {ep_num} 集 {mm:02d}:{ss:02d}"
+                
+                page.keyboard.type(content)
+                with page.expect_file_chooser() as fc_info:
+                    page.click('svg[aria-label="附加媒體"]')
+                fc_info.value.set_files(img_path)
+                
+                time.sleep(10) # 等待圖片上傳
+                # 點擊發佈
+                page.click('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")')
+                print(f"✅ 已成功發佈 ({i+1}/6): {content}")
+
+                i_idx += 1
+                with open(PROGRESS_FILE, 'w') as f:
+                    f.write(f"{f_idx},{i_idx}")
+                
+                if i < 5:
+                    print("⏳ 等待 600 秒發送下一張...")
+                    time.sleep(600)
+            except Exception as e:
+                print(f"❌ 發文過程出錯: {e}")
+                break
                 
         browser.close()
 
 if __name__ == "__main__":
     main()
-
