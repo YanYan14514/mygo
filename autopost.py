@@ -116,42 +116,29 @@ def main():
                 continue
 
             try:
-                # 重新回到首頁確保按鈕存在
-                page.goto("https://www.threads.net/")
-                page.wait_for_selector('svg[aria-label="建立內容"]', timeout=30000)
-                page.click('svg[aria-label="建立內容"]')
-                page.wait_for_selector('div[role="textbox"]')
+            # 1. 增加超時到 90 秒，並將等待條件改為 domcontentloaded (只要結構出來就好)
+            print("🌐 正在開啟 Threads 頁面...")
+            page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=90000)
+            
+            # 2. 給一點緩衝時間讓 Cookie 生效
+            time.sleep(10) 
+            
+            # 3. 檢查是否登入成功
+            if page.query_selector('svg[aria-label="建立內容"]') or page.query_selector('svg[aria-label="New thread"]'):
+                print("✅ Cookie 登入成功！")
+            else:
+                # 如果找不到按鈕，可能是首頁還沒載入完，再等一下下
+                print("⏳ 找不到發文按鈕，嘗試最後等待...")
+                page.wait_for_selector('svg[aria-label*="建立"], svg[aria-label*="thread"]', timeout=30000)
+                print("✅ Cookie 登入成功！")
                 
-                # 時間與文案換算
-                mm, ss = divmod(i_idx, 60)
-                ep_num = folder['name'].replace('mygo', '').replace('123_part1', '1').replace('123_part2', '1')
-                content = f"BanG Dream! It's MyGO!!!!! 第 {ep_num} 集 {mm:02d}:{ss:02d}"
-                
-                page.keyboard.type(content)
-                with page.expect_file_chooser() as fc_info:
-                    page.click('svg[aria-label="附加媒體"]')
-                fc_info.value.set_files(img_path)
-                
-                time.sleep(7) # 增加等待圖片載入的時間
-                page.click('div[role="button"]:has-text("發佈")')
-                print(f"✅ 已成功發佈 ({i+1}/6): {content}")
-
-                # 更新進度變數
-                i_idx += 1
-                
-                # 立即將進度寫入本地檔案 (為了最後 commit 回去)
-                with open(PROGRESS_FILE, 'w') as f:
-                    f.write(f"{f_idx},{i_idx}")
-                
-                if i < 5:
-                    print("⏳ 等待 600 秒發送下一張...")
-                    time.sleep(600)
-                    
-            except Exception as e:
-                print(f"❌ 發文過程出錯: {e}")
-                break
+        except Exception as e:
+            page.screenshot(path="login_error.png") # 失敗時截圖
+            print(f"❌ 登入失敗或頁面載入過慢: {e}")
+            return
                 
         browser.close()
 
 if __name__ == "__main__":
     main()
+
