@@ -51,31 +51,37 @@ def main():
     drive_service = build('drive', 'v3', credentials=creds)
 
     with sync_playwright() as p:
+        # 1. 啟動瀏覽器時就直接注入偽裝的 User-Agent
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         browser = p.chromium.launch(headless=True)
-        # 登入 Threads
-        print("🔑 正在登入 Threads...")
-        # 設定 User-Agent 偽裝成一般的電腦瀏覽器，避免被當成機器人擋掉
-        context.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"})
         
+        # 2. 建立 Context 並設定語言為中文，這樣按鈕名字才不會跑掉
+        context = browser.new_context(
+            viewport={'width': 1280, 'height': 720},
+            user_agent=user_agent,
+            locale="zh-TW"
+        )
+        page = context.new_page()
+
+        print("🔑 正在登入 Threads...")
         page.goto("https://www.threads.net/login", wait_until="networkidle")
         
-        # 嘗試多種可能的輸入框定位
         try:
+            # 等待輸入框出現
             page.wait_for_selector('input', timeout=60000)
-            # 抓取頁面上第一個和第二個輸入框
+            
+            # 抓取頁面上所有輸入框並填寫
             inputs = page.query_selector_all('input')
             if len(inputs) >= 2:
                 inputs[0].fill(secrets['user'])
                 inputs[1].fill(secrets['pass'])
-            else:
-                # 備用方案：如果上面的沒抓到，改用屬性抓
-                page.type('input[name="username"], input[type="text"]', secrets['user'])
-                page.type('input[name="password"], input[type="password"]', secrets['pass'])
+                time.sleep(1) # 稍微停頓模擬真人
             
-            # 點擊任何看起來像登入的按鈕
-            page.click('button[type="submit"], div[role="button"]:has-text("登入"), div[role="button"]:has-text("Log in")')
+            # 點擊登入按鈕 (同時支援中英文)
+            login_btn = page.locator('button[type="submit"], div[role="button"]:has-text("登入"), div[role="button"]:has-text("Log in")').first
+            login_btn.click()
             
-            # 等待跳轉到首頁 (代表登入成功)
+            # 等待跳轉，時間給長一點，因為登入有時候會卡
             page.wait_for_url("https://www.threads.net/", timeout=60000)
             print("✅ 登入成功！")
             
@@ -139,5 +145,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
