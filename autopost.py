@@ -8,9 +8,9 @@ from googleapiclient.http import MediaIoBaseDownload
 from playwright.sync_api import sync_playwright
 
 # --- 配置區 ---
+# 請確保這些 Folder ID 與你的 Google Drive 網址對應
 FOLDER_LIST = [
-    {'name': 'mygo123_part1', 'id': '1ej8KQ7dV5Vi2DvpJ0rw-Bv17T3DTisma'},
-    {'name': 'mygo123_part2', 'id': '1Ba2FHg9U4CCp5ZRloeObj3w9k0B0FN_m'},
+    {'name': 'mygo123', 'id': '1Ba2FHg9U4CCp5ZRloeObj3w9k0B0FN_m'},
     {'name': 'mygo4', 'id': '1TyKoUKlsuARHQ59gViPU4H9SKT2JbERD'},
     {'name': 'mygo5', 'id': '1NW98O1i6EkO_SlZWqLtNBO78N-vveugw'},
     {'name': 'mygo6', 'id': '1F6vmpH2PCZ-H8qQ1OGxFDqEJBmS_zJ9k'},
@@ -29,7 +29,8 @@ def download_image(service, folder_id, filename):
         query = f"'{folder_id}' in parents and name = '{filename}'"
         results = service.files().list(q=query, fields="files(id, name)").execute()
         items = results.get('files', [])
-        if not items: return None
+        if not items:
+            return None
         file_id = items[0]['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
@@ -42,7 +43,7 @@ def download_image(service, folder_id, filename):
             f.write(fh.getbuffer())
         return local_path
     except Exception as e:
-        print(f"下載圖片出錯: {e}")
+        print(f"❌ 下載圖片出錯: {e}")
         return None
 
 def main():
@@ -53,9 +54,11 @@ def main():
         print("❌ 缺少必要的 Secrets 設定 (GDRIVE_JSON 或 THREADS_SESSION_ID)")
         return
 
+    # 初始化 Google Drive
     creds = service_account.Credentials.from_service_account_info(json.loads(gdrive_json))
     drive_service = build('drive', 'v3', credentials=creds)
 
+    # 讀取進度
     if not os.path.exists(PROGRESS_FILE):
         f_idx, i_idx = 0, 1
     else:
@@ -66,86 +69,96 @@ def main():
     with sync_playwright() as p:
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={'width': 1280, 'height': 720},
-            user_agent=user_agent,
-            locale="zh-TW"
-        )
+        context = browser.new_context(viewport={'width': 1280, 'height': 720}, user_agent=user_agent, locale="zh-TW")
         page = context.new_page()
 
-        print("🔑 Authorization: 使用 Session Cookie...")
+        print("🔑 Authorization: 嘗試使用 Session Cookie 登入...")
         context.add_cookies([{
-            'name': 'sessionid',
-            'value': session_id,
-            'domain': '.threads.net',
-            'path': '/',
-            'secure': True,
-            'httpOnly': True,
-            'sameSite': 'Lax'
+            'name': 'sessionid', 'value': session_id, 'domain': '.threads.net',
+            'path': '/', 'secure': True, 'httpOnly': True, 'sameSite': 'Lax'
         }])
         
         try:
             print("🌐 正在開啟 Threads 頁面...")
             page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=90000)
-            time.sleep(10) 
+            time.sleep(10) # 等待頁面渲染
             
-            # 偵測中文或英文版的發文按鈕
-            if page.query_selector('svg[aria-label="建立內容"]') or page.query_selector('svg[aria-label="New thread"]'):
+            # 偵測登入狀態
+            post_btn_selector = 'svg[aria-label*="建立"], svg[aria-label*="thread"], svg[aria-label="建立內容"]'
+            if page.query_selector(post_btn_selector):
                 print("✅ Cookie 登入成功！")
             else:
-                print("⏳ 找不到發文按鈕，嘗試最後等待...")
-                page.wait_for_selector('svg[aria-label*="建立"], svg[aria-label*="thread"]', timeout=30000)
-                print("✅ Cookie 登入成功！")
+                print("⏳ 正在等待發文按鈕出現...")
+                page.wait_for_selector(post_btn_selector, timeout=30000)
+                print("✅ 找到按鈕，登入成功！")
         except Exception as e:
-            print(f"❌ 登入失敗或頁面載入過慢: {e}")
+            print(f"❌ 登入階段異常: {e}")
+            browser.close()
             return
 
-        # --- 發文循環 ---
+        # --- 發文循環 (每次執行發 6 張) ---
         for i in range(6):
             if f_idx >= len(FOLDER_LIST):
-                print("🏁 全劇終！")
+                print("🏁 所有資料夾已處理完畢！")
                 break
 
             folder = FOLDER_LIST[f_idx]
             filename = f"frame_{i_idx:04d}.jpg"
-            print(f"📸 準備下載: {folder['name']} / {filename}")
+            print(f"📸 正在搜尋: {folder['name']} / {filename}")
+            
             img_path = download_image(drive_service, folder['id'], filename)
 
             if not img_path:
-                print(f"⏭️ 找不到檔案 {filename}，跳轉下一集")
+                print(f"⏭️ 找不到檔案 {filename}，嘗試跳轉到下一個資料夾")
                 f_idx += 1
                 i_idx = 1
                 continue
 
             try:
-                page.goto("https://www.threads.net/")
-                page.wait_for_selector('svg[aria-label*="建立"], svg[aria-label*="thread"]', timeout=30000)
-                page.click('svg[aria-label*="建立"], svg[aria-label*="thread"]')
-                page.wait_for_selector('div[role="textbox"]')
+                # 確保在首頁
+                if page.url != "https://www.threads.net/":
+                    page.goto("https://www.threads.net/")
                 
+                # 1. 點擊發文按鈕
+                page.wait_for_selector(post_btn_selector, timeout=30000)
+                page.click(post_btn_selector, force=True)
+                
+                # 2. 等待輸入框出現
+                page.wait_for_selector('div[role="textbox"]', timeout=30000)
+                time.sleep(2)
+                
+                # 3. 準備內容
                 mm, ss = divmod(i_idx, 60)
-                ep_num = folder['name'].replace('mygo', '').replace('123_part1', '1').replace('123_part2', '1')
-                content = f"BanG Dream! It's MyGO!!!!! 第 {ep_num} 集 {mm:02d}:{ss:02d}"
+                ep_name = folder['name'].replace('mygo', '').replace('123_part1', '1').replace('123_part2', '1')
+                content = f"BanG Dream! It's MyGO!!!!! 第 {ep_name} 集 {mm:02d}:{ss:02d}"
                 
-                page.keyboard.type(content)
+                # 4. 填寫文字與上傳圖片
+                page.fill('div[role="textbox"]', content)
                 with page.expect_file_chooser() as fc_info:
-                    page.click('svg[aria-label="附加媒體"]')
+                    page.click('svg[aria-label*="附加"], svg[aria-label*="Attach"]')
                 fc_info.value.set_files(img_path)
                 
-                time.sleep(10) # 等待圖片上傳
-                # 點擊發佈
-                page.click('div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")')
-                print(f"✅ 已成功發佈 ({i+1}/6): {content}")
+                print(f"📤 圖片上傳中... ({content})")
+                time.sleep(15) # 給予充足的上傳時間
+                
+                # 5. 點擊發佈
+                post_confirm_selector = 'div[role="button"]:has-text("發佈"), div[role="button"]:has-text("Post")'
+                page.click(post_confirm_selector)
+                
+                print(f"🎉 成功發佈第 {i+1} 張圖片！")
 
+                # 更新進度
                 i_idx += 1
                 with open(PROGRESS_FILE, 'w') as f:
                     f.write(f"{f_idx},{i_idx}")
                 
                 if i < 5:
-                    print("⏳ 等待 600 秒發送下一張...")
+                    print("⏳ 等待 600 秒後處理下一張...")
                     time.sleep(600)
+                    
             except Exception as e:
                 print(f"❌ 發文過程出錯: {e}")
+                page.screenshot(path=f"error_step_{i}.png")
                 break
                 
         browser.close()
