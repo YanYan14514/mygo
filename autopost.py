@@ -57,8 +57,17 @@ def main():
 
         print("🔑 正在登入 Threads...")
         page.goto("https://www.threads.net/login")
-        page.fill('input[placeholder*="帳號"]', secrets['user'])
-        page.fill('input[placeholder*="密碼"]', secrets['pass'])
+        # 登入 Threads
+        print("🔑 正在登入 Threads...")
+        page.goto("https://www.threads.net/login")
+        
+        # 使用更穩定的選擇器 (根據 Threads 原始碼)
+        page.wait_for_selector('input[name="username"]', timeout=60000)
+        page.fill('input[name="username"]', secrets['user'])
+        page.fill('input[name="password"]', secrets['pass'])
+        
+        # 點擊登入按鈕
+        page.click('div[role="button"]:has-text("登入"), div[role="button"]:has-text("Log in")')
         page.click('div[role="button"]:has-text("登入")')
         page.wait_for_url("https://www.threads.net/", timeout=60000)
         print("✅ 登入成功！")
@@ -117,3 +126,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
